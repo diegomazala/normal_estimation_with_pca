@@ -180,24 +180,27 @@ static void export_normals_rgb(const std::string& filename, const std::vector<Ei
 	file.close();
 }
 
-
-void run_pca(const Eigen::MatrixXd& data_matrix, Eigen::RowVectorXd& sorted_eigen_values, Eigen::MatrixXd& sorted_eigen_vectors)
+template<typename Type>
+void run_pca(
+	const Eigen::Matrix<Type, Eigen::Dynamic, Eigen::Dynamic>& data_matrix,
+	Eigen::Matrix<Type, 1, Eigen::Dynamic>& sorted_eigen_values,
+	Eigen::Matrix<Type, Eigen::Dynamic, Eigen::Dynamic>& sorted_eigen_vectors)
 {
 	//std::cout << "Data Matrix:\n" << data_matrix << std::endl << std::endl;
 
 	// Compute a centered version of data matrix 
-	Eigen::MatrixXd centenered_data_matrix = data_matrix.rowwise() - data_matrix.colwise().mean();
+	Eigen::Matrix<Type, Eigen::Dynamic, Eigen::Dynamic> centenered_data_matrix = data_matrix.rowwise() - data_matrix.colwise().mean();
 
 	//std::cout << "Centered Data Matrix:\n" << centenered_data_matrix << std::endl << std::endl;
 
-	Eigen::MatrixXd covariance_matrix = (centenered_data_matrix.adjoint() * centenered_data_matrix) / (double)(data_matrix.rows());
+	Eigen::Matrix<Type, Eigen::Dynamic, Eigen::Dynamic> covariance_matrix = (centenered_data_matrix.adjoint() * centenered_data_matrix) / (Type)(data_matrix.rows());
 
 	//std::cout << "Covariance Matrix:\n" << covariance_matrix << std::endl << std::endl;
 
 	// Use SelfAdjointEigenSolver to get eigen values and eigen vectors 
-	Eigen::SelfAdjointEigenSolver<Eigen::MatrixXd> eigen_solver(covariance_matrix);
-	Eigen::RowVectorXd eigen_values = eigen_solver.eigenvalues();
-	Eigen::MatrixXd eigen_vectors = eigen_solver.eigenvectors();
+	Eigen::SelfAdjointEigenSolver<Eigen::Matrix<Type, Eigen::Dynamic, Eigen::Dynamic>> eigen_solver(covariance_matrix);
+	Eigen::Matrix<Type, 1, Eigen::Dynamic> eigen_values = eigen_solver.eigenvalues();
+	Eigen::Matrix<Type, Eigen::Dynamic, Eigen::Dynamic> eigen_vectors = eigen_solver.eigenvectors();
 
 	// Stuff below is done to sort eigen values. This can be done in other ways too. 
 	std::vector<std::pair<int, int>> eigen_value_index_vector;
@@ -207,8 +210,8 @@ void run_pca(const Eigen::MatrixXd& data_matrix, Eigen::RowVectorXd& sorted_eige
 	}
 	std::sort(std::begin(eigen_value_index_vector), std::end(eigen_value_index_vector), std::greater<std::pair<int, int>>());
 
-	sorted_eigen_values = Eigen::RowVectorXd(eigen_values.cols());
-	sorted_eigen_vectors = Eigen::MatrixXd(eigen_vectors.rows(), eigen_vectors.cols());
+	sorted_eigen_values = Eigen::Matrix<Type, 1, Eigen::Dynamic>(eigen_values.cols());
+	sorted_eigen_vectors = Eigen::Matrix<Type, Eigen::Dynamic, Eigen::Dynamic>(eigen_vectors.rows(), eigen_vectors.cols());
 	for (int i = 0; i < eigen_values.size(); ++i)
 	{
 		sorted_eigen_values[i] = eigen_values[eigen_value_index_vector[i].second]; //can also be eigen_value_index_vector[i].first
@@ -260,23 +263,12 @@ void arrays_to_mesh(const Type* vertex_array, const Type* normal_array, aiMesh*&
 
 		for (int j = 0; j<3; j++)
 		{
-			////memcpy(&mesh->mNormals[face.mIndices[j]][0], normal_array, sizeof(Type) * 3);
-			//memcpy(&mesh->mNormals[face.mIndices[j]], normal_array, sizeof(Type) * 3);
-			//normal_array += 3;
-
-			//memcpy(&mesh->mVertices[face.mIndices[j]], vertex_array, sizeof(Type) * 3);
-			//vertex_array += 3;
-
-			//aiVector3D normal = mesh->mNormals[face.mIndices[j]];
-			//memcpy(normal_array, &normal, sizeof(Type) * 3);
+			aiVector3D& normal = mesh->mNormals[face.mIndices[j]];
+			memcpy(&normal, normal_array, sizeof(ai_real) * 3);
 			normal_array += 3;
 
-			//mesh->mVertices[face.mIndices[j]].x = *(vertex_array + 0);
-			//mesh->mVertices[face.mIndices[j]].y = *(vertex_array + 1);
-			//mesh->mVertices[face.mIndices[j]].z = *(vertex_array + 2);
-			
-			//Type* pos = &mesh->mVertices[face.mIndices[j]].x;
-			//memcpy(vertex_array, &pos, sizeof(Type) * 3);
+			aiVector3D& pos = mesh->mVertices[face.mIndices[j]];
+			memcpy(&pos, vertex_array, sizeof(ai_real) * 3);
 			vertex_array += 3;
 		}
 	}
@@ -284,48 +276,49 @@ void arrays_to_mesh(const Type* vertex_array, const Type* normal_array, aiMesh*&
 	vertex_array -= mesh->mNumFaces * 3 * 3;
 }
 
-//void using_assimp()
-//{
-//	//
-//	// Import file
-//	// 
-//	Assimp::Importer importer;
-//	const aiScene *scene = importer.ReadFile(file_name, aiProcessPreset_TargetRealtime_Fast);//aiProcessPreset_TargetRealtime_Fast has the configs you'll need
-//	if (scene == nullptr)
-//	{
-//		std::cout << "Error: Could not read file: " << file_name << std::endl;
-//		return EXIT_FAILURE;
-//	}
-//
-//	aiMesh *mesh = scene->mMeshes[0]; //assuming you only want the first mesh
-//	std::cout
-//		<< "File        : " << file_name << std::endl
-//		<< "Vertices    : " << mesh->mNumVertices << std::endl
-//		<< "Faces       : " << mesh->mNumFaces << std::endl
-//		<< "Has Normals : " << mesh->HasNormals() << std::endl;
-//
-//
-//	const size_t vertex_array_size = mesh->mNumFaces * 3 * 3;
-//	Decimal* vertex_array = new Decimal[vertex_array_size];
-//	Decimal* normal_array = new Decimal[vertex_array_size];
-//
-//	Assimp::Exporter exporter;
-//	// [0 - dae], [1 - .x], [2 - .stp], [3 - .obj], [4 - .stl], [5 - .ply], 
-//	const aiExportFormatDesc* format = exporter.GetExportFormatDescription(3);
-//	aiReturn ret = exporter.Export(scene, format->id, "../../data/out.obj", scene->mFlags);
-//	std::cout << exporter.GetErrorString() << std::endl;
-//
-//
-//	mesh_to_arrays(mesh, vertex_array, normal_array);
-//	arrays_to_mesh(vertex_array, normal_array, mesh);
-//
-//	ret = exporter.Export(scene, format->id, "../../data/out_2.obj", scene->mFlags);
-//
-//	delete[] vertex_array;
-//	delete[] normal_array;
-//
-//	return 0;
-//}
+int using_assimp(const std::string& input_filename, const std::string& output_filename)
+{
+	typedef float Decimal;
+	const int Dimension = 3;
+	const int NumNeighbours = 5;
+
+	//
+	// Import file
+	// 
+	Assimp::Importer importer;
+	const aiScene *scene = importer.ReadFile(input_filename, aiProcessPreset_TargetRealtime_Fast);//aiProcessPreset_TargetRealtime_Fast has the configs you'll need
+	if (scene == nullptr)
+	{
+		std::cout << "Error: Could not read file: " << input_filename << std::endl;
+		return EXIT_FAILURE;
+	}
+
+	aiMesh *mesh = scene->mMeshes[0]; //assuming you only want the first mesh
+	std::cout
+		<< "File        : " << input_filename << std::endl
+		<< "Vertices    : " << mesh->mNumVertices << std::endl
+		<< "Faces       : " << mesh->mNumFaces << std::endl
+		<< "Has Normals : " << mesh->HasNormals() << std::endl;
+
+
+	const size_t vertex_array_size = mesh->mNumFaces * 3 * 3;
+	Decimal* vertex_array = new Decimal[vertex_array_size];
+	Decimal* normal_array = new Decimal[vertex_array_size];
+
+	mesh_to_arrays(mesh, vertex_array, normal_array);
+	arrays_to_mesh(vertex_array, normal_array, mesh);
+
+	Assimp::Exporter exporter;
+	// [0 - dae], [1 - .x], [2 - .stp], [3 - .obj], [4 - .stl], [5 - .ply], 
+	const aiExportFormatDesc* format = exporter.GetExportFormatDescription(3);
+	aiReturn ret = exporter.Export(scene, format->id, output_filename, scene->mFlags);
+	std::cout << "Error: " << exporter.GetErrorString()  << " ! " << std::endl;
+
+	delete[] vertex_array;
+	delete[] normal_array;
+
+	return EXIT_SUCCESS;
+}
 
 int main(int argc, char* argv[])
 {
@@ -340,6 +333,8 @@ int main(int argc, char* argv[])
 		input_filename = argv[1];
 	if (argc > 2)
 		output_filename = argv[2];
+
+	//return using_assimp(input_filename, output_filename);
 
 	std::vector<Decimal> vertices, normals;
 	if (!import_obj(input_filename, vertices, normals))
@@ -374,8 +369,8 @@ int main(int argc, char* argv[])
 		const Decimal qy = query[i][1];
 		const Decimal qz = query[i][2];
 
-		Eigen::RowVectorXd eigen_values;
-		Eigen::MatrixXd eigen_vectors;
+		Eigen::Matrix<Decimal, 1, Eigen::Dynamic> eigen_values;
+		Eigen::Matrix<Decimal, Eigen::Dynamic, Eigen::Dynamic> eigen_vectors;
 		Eigen::Matrix<Decimal, NumNeighbours, Dimension> pca_data_matrix;	// indices.cols == NumNeighbours
 
 		for (int j = 0; j < indices.cols; ++j)
@@ -390,7 +385,7 @@ int main(int argc, char* argv[])
 		}
 
 
-		run_pca(pca_data_matrix, eigen_values, eigen_vectors);
+		run_pca<Decimal>(pca_data_matrix, eigen_values, eigen_vectors);
 
 		normals_estimated.push_back( eigen_vectors.col(2) );
 	}

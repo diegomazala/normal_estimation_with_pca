@@ -10,175 +10,6 @@
 #include <assimp/scene.h>           // Output data structure
 #include <assimp/postprocess.h>     // Post processing fla
 
-template<typename Type, int Rows = 3, int Cols = 1>
-static bool import_obj(const std::string& filename, std::vector<Eigen::Matrix<Type, Rows, Cols>>& points3D)
-{
-	std::ifstream inFile;
-	inFile.open(filename);
-
-	if (!inFile.is_open())
-	{
-		std::cerr << "Error: Could not open obj input file: " << filename << std::endl;
-		return false;
-	}
-
-	points3D.clear();
-
-	int i = 0;
-	while (inFile)
-	{
-		std::string str;
-
-		if (!std::getline(inFile, str))
-		{
-			if (inFile.eof())
-				return true;
-
-			std::cerr << "Error: Problems when reading obj file: " << filename << std::endl;
-			return false;
-		}
-
-		if (str[0] == 'v')
-		{
-			std::stringstream ss(str);
-			std::vector <std::string> record;
-
-			char c;
-			Type x, y, z;
-			ss >> c >> x >> y >> z;
-
-			const Eigen::Matrix<Type, 3, 1> p(x, y, z);
-			points3D.push_back(p);
-		}
-	}
-
-	inFile.close();
-
-	return true;
-}
-
-
-template<typename Type>
-static bool import_obj(const std::string& filename, std::vector<Type>& vertices, std::vector<Type>& normals)
-{
-	std::ifstream inFile;
-	inFile.open(filename);
-
-	if (!inFile.is_open())
-	{
-		std::cerr << "Error: Could not open obj input file: " << filename << std::endl;
-		return false;
-	}
-
-	vertices.clear();
-	normals.clear();
-
-	int i = 0;
-	while (inFile)
-	{
-		std::string str;
-
-		if (!std::getline(inFile, str))
-		{
-			if (inFile.eof())
-				return true;
-
-			std::cerr << "Error: Problems when reading obj file: " << filename << std::endl;
-			return false;
-		}
-
-		//if (str[0] == 'v' && str[1] == ' ')
-		if (str[0] == 'v')
-		{
-			if (str[1] == ' ')  // vertex
-			{
-				std::stringstream ss(str);
-				std::vector <std::string> record;
-
-				char c;
-				Type x, y, z;
-				ss >> c >> x >> y >> z;
-				vertices.push_back(x);
-				vertices.push_back(y);
-				vertices.push_back(z);
-			}
-			else if (str[1] == 'n')  // vertex
-			{
-				std::stringstream ss(str);
-				std::vector <std::string> record;
-
-				char c;
-				Type x, y, z;
-				ss >> c >> x >> y >> z;
-				normals.push_back(x);
-				normals.push_back(y);
-				normals.push_back(z);
-			}
-		}
-	}
-
-	inFile.close();
-
-	return true;
-}
-
-
-template<typename Type, int Rows>
-static void export_obj_with_normals(const std::string& filename, const std::vector<Eigen::Matrix<Type, Rows, 1>>& vertices, const std::vector<Eigen::Matrix<Type, Rows, 1>>& normals)
-{
-	std::ofstream file;
-	file.open(filename);
-	for (const auto v : vertices)
-		file << std::fixed << "v " << v.transpose() << std::endl;
-	for (const auto n : normals)
-		file << std::fixed << "vn " << n.transpose() << std::endl;
-	file.close();
-}
-
-template<typename Type, int Rows>
-static void export_obj_with_colors(const std::string& filename, const std::vector<Eigen::Matrix<Type, Rows, 1>>& vertices, const std::vector<Eigen::Vector3i>& rgb)
-{
-	std::ofstream file;
-	file.open(filename);
-	for (int i = 0; i < vertices.size(); ++i)
-	{
-		const auto& v = vertices[i];
-		const auto& c = rgb[i];
-		file << std::fixed << "v " << v.transpose() << '\t' << c.transpose() << std::endl;
-	}
-	file.close();
-}
-
-
-template<typename Type, int Rows>
-static void export_obj_normals_as_colors(const std::string& filename, const std::vector<Eigen::Matrix<Type, Rows, 1>>& vertices, const std::vector<Eigen::Matrix<Type, Rows, 1>>& normals)
-{
-	std::ofstream file;
-	file.open(filename);
-	for (int i = 0; i < vertices.size(); ++i)
-	{
-		const auto& v = vertices[i];
-		const auto& c = normals[i].abs() * 255;
-
-		file << std::fixed << "v " << v.transpose() << '\t' << c.transpose() << std::endl;
-	}
-	file.close();
-}
-
-
-template<typename Type, int Rows>
-static void export_normals_rgb(const std::string& filename, const std::vector<Eigen::Matrix<Type, Rows, 1>>& normals)
-{
-	std::ofstream file;
-	file.open(filename);
-	for (int i = 0; i < normals.size(); ++i)
-	{
-		const auto& c = normals[i].abs() * 255;
-
-		file << std::fixed << "v " << c.transpose() << std::endl;
-	}
-	file.close();
-}
 
 template<typename Type>
 void run_pca(
@@ -226,8 +57,11 @@ void run_pca(
 }
 
 
+
 template<typename Type>
-void mesh_to_arrays(const aiMesh* mesh, Type*& vertex_array, Type*& normal_array)
+void copy_vertices_from_mesh(
+	const aiMesh* mesh, 
+	Type*& vertex_array)
 {
 	for (unsigned int i = 0; i<mesh->mNumFaces; i++)
 	{
@@ -239,23 +73,23 @@ void mesh_to_arrays(const aiMesh* mesh, Type*& vertex_array, Type*& normal_array
 			//memcpy(uv_array, &uv, sizeof(float) * 2);
 			//uvArray += 2;
 
-			aiVector3D normal = mesh->mNormals[face.mIndices[j]];
-			memcpy(normal_array, &normal, sizeof(Type) * 3);
-			normal_array += 3;
+			//aiVector3D normal = mesh->mNormals[face.mIndices[j]];
+			//memcpy(normal_array, &normal, sizeof(Type) * 3);
+			//normal_array += 3;
 
 			aiVector3D pos = mesh->mVertices[face.mIndices[j]];
 			memcpy(vertex_array, &pos, sizeof(Type) * 3);
 			vertex_array += 3;
 		}
 	}
-	normal_array -= mesh->mNumFaces * 3 * 3;
 	vertex_array -= mesh->mNumFaces * 3 * 3;
 }
 
 
-
 template<typename Type>
-void arrays_to_mesh(const Type* vertex_array, const Type* normal_array, aiMesh*& mesh)
+void copy_normals_to_mesh(
+	const Type* normal_array, 
+	aiMesh*& mesh)
 {
 	for (unsigned int i = 0; i<mesh->mNumFaces; i++)
 	{
@@ -266,21 +100,34 @@ void arrays_to_mesh(const Type* vertex_array, const Type* normal_array, aiMesh*&
 			aiVector3D& normal = mesh->mNormals[face.mIndices[j]];
 			memcpy(&normal, normal_array, sizeof(ai_real) * 3);
 			normal_array += 3;
-
-			aiVector3D& pos = mesh->mVertices[face.mIndices[j]];
-			memcpy(&pos, vertex_array, sizeof(ai_real) * 3);
-			vertex_array += 3;
 		}
 	}
 	normal_array -= mesh->mNumFaces * 3 * 3;
-	vertex_array -= mesh->mNumFaces * 3 * 3;
 }
 
-int using_assimp(const std::string& input_filename, const std::string& output_filename)
+
+
+
+int main(int argc, char* argv[])
 {
-	typedef float Decimal;
+	std::cout
+		<< std::endl
+		<< "Usage  : ./normal_estimation.exe input.obj output.obj" << std::endl
+		<< "Default: ./normal_estimation.exe ../../data/sphere.obj ../../data/normal_estimated.obj" << std::endl
+		<< std::endl;
+
+	typedef double Decimal;
 	const int Dimension = 3;
 	const int NumNeighbours = 5;
+
+	std::string input_filename = "../../data/sphere.obj";
+	std::string output_filename = "../../data/normal_estimated.obj";
+
+	if (argc > 1)
+		input_filename = argv[1];
+	if (argc > 2)
+		output_filename = argv[2];
+	
 
 	//
 	// Import file
@@ -293,6 +140,7 @@ int using_assimp(const std::string& input_filename, const std::string& output_fi
 		return EXIT_FAILURE;
 	}
 
+
 	aiMesh *mesh = scene->mMeshes[0]; //assuming you only want the first mesh
 	std::cout
 		<< "File        : " << input_filename << std::endl
@@ -301,54 +149,18 @@ int using_assimp(const std::string& input_filename, const std::string& output_fi
 		<< "Has Normals : " << mesh->HasNormals() << std::endl;
 
 
+
 	const size_t vertex_array_size = mesh->mNumFaces * 3 * 3;
 	Decimal* vertex_array = new Decimal[vertex_array_size];
 	Decimal* normal_array = new Decimal[vertex_array_size];
-
-	mesh_to_arrays(mesh, vertex_array, normal_array);
-	arrays_to_mesh(vertex_array, normal_array, mesh);
-
-	Assimp::Exporter exporter;
-	// [0 - dae], [1 - .x], [2 - .stp], [3 - .obj], [4 - .stl], [5 - .ply], 
-	const aiExportFormatDesc* format = exporter.GetExportFormatDescription(3);
-	aiReturn ret = exporter.Export(scene, format->id, output_filename, scene->mFlags);
-	std::cout << "Error: " << exporter.GetErrorString()  << " ! " << std::endl;
-
-	delete[] vertex_array;
-	delete[] normal_array;
-
-	return EXIT_SUCCESS;
-}
-
-int main(int argc, char* argv[])
-{
-	typedef double Decimal;
-	const int Dimension = 3;
-	const int NumNeighbours = 5;
-
-	std::string input_filename = "../../data/sphere.obj";
-	std::string output_filename = "../../data/normal_estimated.obj";
-
-	if (argc > 1)
-		input_filename = argv[1];
-	if (argc > 2)
-		output_filename = argv[2];
-
-	//return using_assimp(input_filename, output_filename);
-
-	std::vector<Decimal> vertices, normals;
-	if (!import_obj(input_filename, vertices, normals))
-	{
-		return EXIT_FAILURE;
-	}
-
+	copy_vertices_from_mesh(mesh, vertex_array);
 	
 	// for each vertex find nearest neighbours
-	const size_t NumInput = vertices.size() / Dimension;
+	const size_t NumInput = vertex_array_size / Dimension;
 	const size_t NumQuery = NumInput;
 
-	flann::Matrix<Decimal> dataset(vertices.data(), NumInput, Dimension);
-	flann::Matrix<Decimal> query(vertices.data(), NumQuery, Dimension);
+	flann::Matrix<Decimal> dataset(vertex_array, NumInput, Dimension);
+	flann::Matrix<Decimal> query(vertex_array, NumQuery, Dimension);
 
 	flann::Matrix<int> indices(new int[query.rows * NumNeighbours], query.rows, NumNeighbours);
 	flann::Matrix<Decimal> dists(new Decimal[query.rows * NumNeighbours], query.rows, NumNeighbours);
@@ -358,11 +170,9 @@ int main(int argc, char* argv[])
 	index.buildIndex();
 
 	// do a knn search, using 128 checks
-	//index.knnSearch(query, indices, dists, NumNeighbours, flann::SearchParams(128));
-	index.knnSearch(query, indices, dists, NumNeighbours, flann::SearchParams(16));
+	index.knnSearch(query, indices, dists, NumNeighbours, flann::SearchParams(32));	//flann::SearchParams(128));
 
-	std::vector<Eigen::Matrix<Decimal, Dimension, 1>> normals_estimated;
-	
+	int n = 0;
 	for (int i = 0; i < indices.rows; ++i)
 	{
 		const Decimal qx = query[i][0];
@@ -387,25 +197,21 @@ int main(int argc, char* argv[])
 
 		run_pca<Decimal>(pca_data_matrix, eigen_values, eigen_vectors);
 
-		normals_estimated.push_back( eigen_vectors.col(2) );
+		normal_array[n++] = eigen_vectors.col(2)[0];
+		normal_array[n++] = eigen_vectors.col(2)[1];
+		normal_array[n++] = eigen_vectors.col(2)[2];
 	}
 
-	if (vertices.size() / Dimension != normals_estimated.size())
-	{
-		std::cerr << "Warning: Vertex and normal count don't match: "
-			<< vertices.size() / Dimension << " != " << normals_estimated.size() << std::endl
-			<< "Abort." << std::endl;
-		return EXIT_FAILURE;
-	}
+	copy_normals_to_mesh(normal_array, mesh);
 
+	Assimp::Exporter exporter;
+	// [0 - dae], [1 - .x], [2 - .stp], [3 - .obj], [4 - .stl], [5 - .ply], 
+	const aiExportFormatDesc* format = exporter.GetExportFormatDescription(3);
+	aiReturn ret = exporter.Export(scene, format->id, output_filename, scene->mFlags);
 
-	std::ofstream file;
-	file.open(output_filename);
-	for (int i = 0; i < normals_estimated.size(); ++i)
-	{
-		const auto& n = normals_estimated[i];
-		file << std::fixed << "vn " << n.transpose() << std::endl;
-	}
-	file.close();
+	delete[] vertex_array;
+	delete[] normal_array;
 
+	delete[] indices.ptr();
+	delete[] dists.ptr();
 }

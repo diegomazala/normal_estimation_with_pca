@@ -57,77 +57,103 @@ void run_pca(
 }
 
 
+void flip_normals(aiMesh* mesh)
+{
+
+	for (int i = 0; i < mesh->mNumVertices; ++i)
+	{
+		mesh->mNormals[i] *= (-1);
+		mesh->mVertices[i] *= 2;
+	}
+
+}
+
 
 template<typename Type>
-void copy_vertices_from_mesh(
+void copy_from_mesh(
 	const aiMesh* mesh, 
-	Type*& vertex_array)
+	Type*& vertex_array,
+	Type*& normal_array)
 {
-	for (unsigned int i = 0; i<mesh->mNumFaces; i++)
+	Type* norm_ptr = normal_array;
+	Type* vert_ptr = vertex_array;
+
+	for (size_t i = 0; i < mesh->mNumVertices; ++i)
 	{
-		const aiFace& face = mesh->mFaces[i];
+		aiVector3D normal = mesh->mNormals[i];
+		memcpy(normal_array, &normal, sizeof(Type) * 3);
+		normal_array += 3;
 
-		for (int j = 0; j<3; j++)
-		{
-			//aiVector3D uv = mesh->mTextureCoords[0][face.mIndices[j]];
-			//memcpy(uv_array, &uv, sizeof(float) * 2);
-			//uvArray += 2;
-
-			//aiVector3D normal = mesh->mNormals[face.mIndices[j]];
-			//memcpy(normal_array, &normal, sizeof(Type) * 3);
-			//normal_array += 3;
-
-			aiVector3D pos = mesh->mVertices[face.mIndices[j]];
-			memcpy(vertex_array, &pos, sizeof(Type) * 3);
-			vertex_array += 3;
-		}
+		aiVector3D pos = mesh->mVertices[i];
+		memcpy(vertex_array, &pos, sizeof(Type) * 3);
+		vertex_array += 3;
 	}
-	vertex_array -= mesh->mNumFaces * 3 * 3;
+	vertex_array = vert_ptr;
+	normal_array = norm_ptr;
 }
 
 
 template<typename Type>
 void copy_normals_to_mesh(
-	const Type* normal_array, 
+	Type* normal_array, 
 	aiMesh*& mesh)
 {
-	for (unsigned int i = 0; i<mesh->mNumFaces; i++)
-	{
-		const aiFace& face = mesh->mFaces[i];
+	Type* norm_ptr = normal_array;
 
-		for (int j = 0; j<3; j++)
-		{
-			aiVector3D& normal = mesh->mNormals[face.mIndices[j]];
-			memcpy(&normal, normal_array, sizeof(ai_real) * 3);
-			normal_array += 3;
-		}
+	for (size_t i = 0; i < mesh->mNumVertices; ++i)
+	{
+		aiVector3D& normal = mesh->mNormals[i];
+		memcpy(&normal, normal_array, sizeof(Type) * 3);
+		normal_array += 3;
+
 	}
-	normal_array -= mesh->mNumFaces * 3 * 3;
+	normal_array = norm_ptr;
 }
 
 
 
-
+#define ASSIMP_DOUBLE_PRECISION
 int main(int argc, char* argv[])
 {
 	std::cout
 		<< std::endl
-		<< "Usage  : ./normal_estimation.exe input.obj output.obj" << std::endl
-		<< "Default: ./normal_estimation.exe ../../data/sphere.obj ../../data/normal_estimated.obj" << std::endl
+		<< "Usage            : ./<app.exe> <input_model> <output_format> <number_of_neighbours> <kd_tree_count> <knn_search_checks>" << std::endl
+		<< "Default          : ./normal_estimation.exe ../../data/sphere.obj obj 16 4 128" << std::endl
 		<< std::endl;
 
-	typedef double Decimal;
+	typedef ai_real Decimal;
 	const int Dimension = 3;
-	const int NumNeighbours = 5;
+	const int NumNeighbours = (argc > 3) ? atoi(argv[3]) : 16;
+	const int KdTreeCount = (argc > 4) ? atoi(argv[4]) : 4;
+	const int KnnSearchChecks = (argc > 5) ? atoi(argv[5]) : 128;
 
 	std::string input_filename = "../../data/sphere.obj";
-	std::string output_filename = "../../data/normal_estimated.obj";
+	std::string output_format = "obj";
 
 	if (argc > 1)
 		input_filename = argv[1];
 	if (argc > 2)
-		output_filename = argv[2];
+		output_format = argv[2];
 	
+	//
+	// Composing output file name
+	// 
+	std::stringstream ss;
+	ss << input_filename.substr(0, input_filename.size() - 4)
+		<< '_' << NumNeighbours << '_' << KdTreeCount << '_' << KnnSearchChecks
+		<< '.' << output_format;
+	std::string output_filename = ss.str();
+
+
+	//
+	// Output info
+	// 
+	std::cout << std::fixed
+		<< "Dimension        : " << Dimension << std::endl
+		<< "NumNeighbours    : " << NumNeighbours << std::endl
+		<< "KdTreeCount      : " << NumNeighbours << std::endl
+		<< "KnnSearchChecks  : " << NumNeighbours << std::endl;
+
 
 	//
 	// Import file
@@ -141,22 +167,24 @@ int main(int argc, char* argv[])
 	}
 
 
+	//
+	// Output info
+	// 
 	aiMesh *mesh = scene->mMeshes[0]; //assuming you only want the first mesh
 	std::cout
-		<< "File        : " << input_filename << std::endl
-		<< "Vertices    : " << mesh->mNumVertices << std::endl
-		<< "Faces       : " << mesh->mNumFaces << std::endl
-		<< "Has Normals : " << mesh->HasNormals() << std::endl;
+		<< "File             : " << input_filename << std::endl
+		<< "Vertices         : " << mesh->mNumVertices << std::endl
+		<< "Faces            : " << mesh->mNumFaces << std::endl
+		<< "Has Normals      : " << mesh->HasNormals() << std::endl;
 
-
-
-	const size_t vertex_array_size = mesh->mNumFaces * 3 * 3;
-	Decimal* vertex_array = new Decimal[vertex_array_size];
-	Decimal* normal_array = new Decimal[vertex_array_size];
-	copy_vertices_from_mesh(mesh, vertex_array);
+	const size_t vertex_array_count = mesh->mNumVertices * Dimension;
+	Decimal* vertex_array = new Decimal[vertex_array_count];
+	Decimal* normal_array = new Decimal[vertex_array_count];
+	copy_from_mesh(mesh, vertex_array, normal_array);
 	
+
 	// for each vertex find nearest neighbours
-	const size_t NumInput = vertex_array_size / Dimension;
+	const size_t NumInput = vertex_array_count / Dimension;
 	const size_t NumQuery = NumInput;
 
 	flann::Matrix<Decimal> dataset(vertex_array, NumInput, Dimension);
@@ -166,11 +194,11 @@ int main(int argc, char* argv[])
 	flann::Matrix<Decimal> dists(new Decimal[query.rows * NumNeighbours], query.rows, NumNeighbours);
 
 	// construct an randomized kd-tree index using 4 kd-trees
-	flann::Index<flann::L2<Decimal> > index(dataset, flann::KDTreeIndexParams(4));
+	flann::Index<flann::L2<Decimal> > index(dataset, flann::KDTreeIndexParams(KdTreeCount));
 	index.buildIndex();
 
 	// do a knn search, using 128 checks
-	index.knnSearch(query, indices, dists, NumNeighbours, flann::SearchParams(32));	//flann::SearchParams(128));
+	index.knnSearch(query, indices, dists, NumNeighbours, flann::SearchParams(KnnSearchChecks));	//flann::SearchParams(128));
 
 	int n = 0;
 	for (int i = 0; i < indices.rows; ++i)
@@ -181,7 +209,7 @@ int main(int argc, char* argv[])
 
 		Eigen::Matrix<Decimal, 1, Eigen::Dynamic> eigen_values;
 		Eigen::Matrix<Decimal, Eigen::Dynamic, Eigen::Dynamic> eigen_vectors;
-		Eigen::Matrix<Decimal, NumNeighbours, Dimension> pca_data_matrix;	// indices.cols == NumNeighbours
+		Eigen::Matrix<Decimal, Eigen::Dynamic, Eigen::Dynamic> pca_data_matrix(NumNeighbours, Dimension);	// indices.cols == NumNeighbours
 
 		for (int j = 0; j < indices.cols; ++j)
 		{
@@ -197,17 +225,19 @@ int main(int argc, char* argv[])
 
 		run_pca<Decimal>(pca_data_matrix, eigen_values, eigen_vectors);
 
-		normal_array[n++] = eigen_vectors.col(2)[0];
-		normal_array[n++] = eigen_vectors.col(2)[1];
-		normal_array[n++] = eigen_vectors.col(2)[2];
+		memcpy(&normal_array[i * Dimension], eigen_vectors.col(2).data(), sizeof(Decimal) * Dimension);
 	}
 
 	copy_normals_to_mesh(normal_array, mesh);
 
 	Assimp::Exporter exporter;
-	// [0 - dae], [1 - .x], [2 - .stp], [3 - .obj], [4 - .stl], [5 - .ply], 
-	const aiExportFormatDesc* format = exporter.GetExportFormatDescription(3);
-	aiReturn ret = exporter.Export(scene, format->id, output_filename, scene->mFlags);
+	aiReturn ret = exporter.Export(scene, output_format, output_filename, scene->mFlags);
+	if (ret == aiReturn_SUCCESS)
+		std::cout << "Output File      : " << output_filename << std::endl;
+	else
+		std::cout << "Output File      : <ERROR> file not saved - " << output_filename << std::endl;
+
+
 
 	delete[] vertex_array;
 	delete[] normal_array;

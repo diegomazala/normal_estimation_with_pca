@@ -5,10 +5,12 @@
 #include <Eigen/Dense>
 #include <flann/flann.hpp>
 
-#include <assimp/Importer.hpp>      // C++ importer interface
-#include <assimp/Exporter.hpp>      // C++ exporter interface
-#include <assimp/scene.h>           // Output data structure
-#include <assimp/postprocess.h>     // Post processing fla
+#include "tinyply.h"
+#include "timer.h"
+#include <experimental/filesystem>
+namespace fs = std::experimental::filesystem;
+
+
 
 
 template<typename Type>
@@ -57,138 +59,158 @@ void run_pca(
 }
 
 
-void flip_normals(aiMesh* mesh)
+bool load_ply(
+	const std::string& input_filename, 
+	std::vector<float>& verts,
+	std::vector<float>& norms, 
+	std::vector<float>& uvCoords,
+	std::vector<uint32_t>& faces,
+	std::vector<uint8_t>& colors)
 {
-
-	for (int i = 0; i < mesh->mNumVertices; ++i)
+	try
 	{
-		mesh->mNormals[i] *= (-1);
-		mesh->mVertices[i] *= 2;
-	}
+		std::cout << "Loading          : " << input_filename << std::endl;
 
+		std::ifstream ss_temp(input_filename, std::ios::binary);
+		tinyply::PlyFile file_template(ss_temp);
+
+		uint64_t vertexCount = file_template.request_properties_from_element("vertex", { "x", "y", "z" }, verts);
+		uint64_t normalCount = file_template.request_properties_from_element("vertex", { "nx", "ny", "nz" }, norms);
+		uint64_t colorCount = file_template.request_properties_from_element("vertex", { "red", "green", "blue", "alpha" }, colors);
+		uint64_t faceCount = file_template.request_properties_from_element("face", { "vertex_indices" }, faces, 3);
+		uint64_t faceTexcoordCount = file_template.request_properties_from_element("face", { "texcoord" }, uvCoords, 6);
+
+		if (vertexCount != (verts.size() / 3))
+		{
+			std::cout << "Error: Only triangle mesh is supported. Abort" << std::endl;
+			return false;
+		}
+
+		file_template.read(ss_temp);
+
+		std::cout
+			<< "Vertices         : " << (!verts.empty() ? verts.size() / 3 : 0) << std::endl
+			<< "Faces            : " << faces.size() << std::endl
+			<< "Normals          : " << (!norms.empty() ? norms.size() / 3 : 0) << std::endl
+			<< "UV Coords        : " << (!uvCoords.empty() ? uvCoords.size() / 2 : 0) << std::endl;
+	}
+	catch (const std::exception & e)
+	{
+		std::cerr << "Error: Could not load " << input_filename << ". " << e.what() << std::endl;
+		return false;
+	}
+	return true;
+}
+
+bool save_ply(
+	const std::string& output_filename,
+	std::vector<float>& verts,
+	std::vector<float>& norms,
+	std::vector<float>& uvCoords,
+	std::vector<uint32_t>& faces,
+	std::vector<uint8_t>& colors)
+{
+	try
+	{
+		std::cout << "Saving           : " << output_filename << std::endl;
+
+		std::filebuf fb;
+		fb.open(output_filename, std::ios::out | std::ios::binary);
+		std::ostream outputStream(&fb);
+
+		tinyply::PlyFile ply_out_file;
+
+		ply_out_file.add_properties_to_element("vertex", { "x", "y", "z" }, verts);
+		if (!norms.empty())
+			ply_out_file.add_properties_to_element("vertex", { "nx", "ny", "nz" }, norms);
+		if (!colors.empty())
+			ply_out_file.add_properties_to_element("vertex", { "red", "green", "blue", "alpha" }, colors);
+		if (!faces.empty())
+			ply_out_file.add_properties_to_element("face", { "vertex_indices" }, faces, 3, tinyply::PlyProperty::Type::UINT8);
+		if (!uvCoords.empty())
+			ply_out_file.add_properties_to_element("face", { "texcoord" }, uvCoords, 6, tinyply::PlyProperty::Type::UINT8);
+
+		ply_out_file.write(outputStream, true);
+
+		fb.close();
+
+		std::cout
+			<< "Vertices         : " << (!verts.empty() ? verts.size() / 3 : 0) << std::endl
+			<< "Faces            : " << faces.size() << std::endl
+			<< "Normals          : " << (!norms.empty() ? norms.size() / 3 : 0) << std::endl
+			<< "UV Coords        : " << (!uvCoords.empty() ? uvCoords.size() / 2 : 0) << std::endl;
+	}
+	catch (const std::exception & e)
+	{
+		std::cerr << "Error: Could not save " << output_filename << ". " << e.what() << std::endl;
+		return EXIT_FAILURE;
+	}
 }
 
 
-template<typename Type>
-void copy_from_mesh(
-	const aiMesh* mesh, 
-	Type*& vertex_array,
-	Type*& normal_array)
-{
-	Type* norm_ptr = normal_array;
-	Type* vert_ptr = vertex_array;
-
-	for (size_t i = 0; i < mesh->mNumVertices; ++i)
-	{
-		aiVector3D normal = mesh->mNormals[i];
-		memcpy(normal_array, &normal, sizeof(Type) * 3);
-		normal_array += 3;
-
-		aiVector3D pos = mesh->mVertices[i];
-		memcpy(vertex_array, &pos, sizeof(Type) * 3);
-		vertex_array += 3;
-	}
-	vertex_array = vert_ptr;
-	normal_array = norm_ptr;
-}
-
-
-template<typename Type>
-void copy_normals_to_mesh(
-	Type* normal_array, 
-	aiMesh*& mesh)
-{
-	Type* norm_ptr = normal_array;
-
-	for (size_t i = 0; i < mesh->mNumVertices; ++i)
-	{
-		aiVector3D& normal = mesh->mNormals[i];
-		memcpy(&normal, normal_array, sizeof(Type) * 3);
-		normal_array += 3;
-
-	}
-	normal_array = norm_ptr;
-}
-
-
-
-#define ASSIMP_DOUBLE_PRECISION
 int main(int argc, char* argv[])
 {
-	std::cout
-		<< std::endl
-		<< "Usage            : ./<app.exe> <input_model> <output_format> <number_of_neighbours> <kd_tree_count> <knn_search_checks>" << std::endl
-		<< "Default          : ./normal_estimation.exe ../../data/sphere.obj obj 16 4 128" << std::endl
-		<< std::endl;
+	if (argc < 4)
+	{
+		std::cout
+			<< std::endl
+			<< "Usage            : ./<app.exe> <input_ply> <output_ply> <number_of_neighbours> <kd_tree_count> <knn_search_checks>" << std::endl
+			<< "Default          : ./normal_estimation.exe ../../data/sphere.ply ply 16 4 128" << std::endl
+			<< std::endl;
+		return EXIT_FAILURE;
+	}
 
-	typedef ai_real Decimal;
+	typedef float Decimal;
 	const int Dimension = 3;
+
+	const std::string input_filename = (argc > 1) ? argv[1] : "../../data/teddy.obj";
+	const std::string output_filename = (argc > 2) ? argv[2] : "output.obj";
+	const std::string extension = fs::path(output_filename).extension().string();
+	const std::string output_format = extension.substr(1, extension.length() - 1);
 	const int NumNeighbours = (argc > 3) ? atoi(argv[3]) : 16;
 	const int KdTreeCount = (argc > 4) ? atoi(argv[4]) : 4;
 	const int KnnSearchChecks = (argc > 5) ? atoi(argv[5]) : 128;
 
-	std::string input_filename = "../../data/sphere.obj";
-	std::string output_format = "obj";
-
-	if (argc > 1)
-		input_filename = argv[1];
-	if (argc > 2)
-		output_format = argv[2];
+	if (output_format != "ply")
+	{
+		std::cout << "File format not suported. Abort" << std::endl;
+		return 1;
+	}
 	
-	//
-	// Composing output file name
-	// 
-	std::stringstream ss;
-	ss << input_filename.substr(0, input_filename.size() - 4)
-		<< '_' << NumNeighbours << '_' << KdTreeCount << '_' << KnnSearchChecks
-		<< '.' << output_format;
-	std::string output_filename = ss.str();
-
 
 	//
 	// Output info
 	// 
 	std::cout << std::fixed
+		<< "Input            : " << input_filename << std::endl
+		<< "Output           : " << output_filename << std::endl
 		<< "Dimension        : " << Dimension << std::endl
 		<< "NumNeighbours    : " << NumNeighbours << std::endl
-		<< "KdTreeCount      : " << NumNeighbours << std::endl
-		<< "KnnSearchChecks  : " << NumNeighbours << std::endl;
+		<< "KdTreeCount      : " << KdTreeCount << std::endl
+		<< "KnnSearchChecks  : " << KnnSearchChecks << std::endl;
 
-
-	//
-	// Import file
-	// 
-	Assimp::Importer importer;
-	const aiScene *scene = importer.ReadFile(input_filename, aiProcessPreset_TargetRealtime_Fast);//aiProcessPreset_TargetRealtime_Fast has the configs you'll need
-	if (scene == nullptr)
+	std::vector<Decimal> verts;
+	std::vector<Decimal> norms, uvCoords;
+	std::vector<uint32_t> faces;
+	std::vector<uint8_t> colors;
+	
+	timer tm_load;
+	if (!load_ply(input_filename, verts, norms, uvCoords, faces, colors))
 	{
-		std::cout << "Error: Could not read file: " << input_filename << std::endl;
+		std::cout << "Error: Could not load ply file." << std::endl;
 		return EXIT_FAILURE;
 	}
+	tm_load.stop();
 
+	std::cout << "Building kd-tree... " << std::endl;
 
-	//
-	// Output info
-	// 
-	aiMesh *mesh = scene->mMeshes[0]; //assuming you only want the first mesh
-	std::cout
-		<< "File             : " << input_filename << std::endl
-		<< "Vertices         : " << mesh->mNumVertices << std::endl
-		<< "Faces            : " << mesh->mNumFaces << std::endl
-		<< "Has Normals      : " << mesh->HasNormals() << std::endl;
-
-	const size_t vertex_array_count = mesh->mNumVertices * Dimension;
-	Decimal* vertex_array = new Decimal[vertex_array_count];
-	Decimal* normal_array = new Decimal[vertex_array_count];
-	copy_from_mesh(mesh, vertex_array, normal_array);
-	
-
+	timer tm_kdtree;
 	// for each vertex find nearest neighbours
-	const size_t NumInput = vertex_array_count / Dimension;
+	const size_t NumInput = verts.size() / Dimension;
 	const size_t NumQuery = NumInput;
 
-	flann::Matrix<Decimal> dataset(vertex_array, NumInput, Dimension);
-	flann::Matrix<Decimal> query(vertex_array, NumQuery, Dimension);
+	flann::Matrix<Decimal> dataset(verts.data(), NumInput, Dimension);
+	flann::Matrix<Decimal> query(verts.data(), NumQuery, Dimension);
 
 	flann::Matrix<int> indices(new int[query.rows * NumNeighbours], query.rows, NumNeighbours);
 	flann::Matrix<Decimal> dists(new Decimal[query.rows * NumNeighbours], query.rows, NumNeighbours);
@@ -199,10 +221,14 @@ int main(int argc, char* argv[])
 
 	// do a knn search, using 128 checks
 	index.knnSearch(query, indices, dists, NumNeighbours, flann::SearchParams(KnnSearchChecks));	//flann::SearchParams(128));
+	tm_kdtree.stop();
 
+	timer tm_pca;
 	int n = 0;
 	for (int i = 0; i < indices.rows; ++i)
 	{
+		std::cout << "Computing row    " << i << '\r';
+
 		const Decimal qx = query[i][0];
 		const Decimal qy = query[i][1];
 		const Decimal qz = query[i][2];
@@ -225,23 +251,43 @@ int main(int argc, char* argv[])
 
 		run_pca<Decimal>(pca_data_matrix, eigen_values, eigen_vectors);
 
-		memcpy(&normal_array[i * Dimension], eigen_vectors.col(2).data(), sizeof(Decimal) * Dimension);
+		memcpy(&norms[i * Dimension], eigen_vectors.col(2).data(), sizeof(Decimal) * Dimension);
 	}
-
-	copy_normals_to_mesh(normal_array, mesh);
-
-	Assimp::Exporter exporter;
-	aiReturn ret = exporter.Export(scene, output_format, output_filename, scene->mFlags);
-	if (ret == aiReturn_SUCCESS)
-		std::cout << "Output File      : " << output_filename << std::endl;
-	else
-		std::cout << "Output File      : <ERROR> file not saved - " << output_filename << std::endl;
-
-
-
-	delete[] vertex_array;
-	delete[] normal_array;
+	std::cout << std::endl;
+	tm_pca.stop();
 
 	delete[] indices.ptr();
 	delete[] dists.ptr();
+
+	//
+	// Normalizing normals
+	//
+	timer tm_nor;
+	for (auto i = 0; i < norms.size(); i += 3)
+	{
+		auto length = std::sqrt((norms[i] * norms[i]) + (norms[i + 1] * norms[i + 1]) + (norms[i + 2] * norms[i + 2]));
+		norms[i] /= length; 
+		norms[i+1] /= length; 
+		norms[i+2] /= length;
+	}
+	tm_nor.stop();
+
+	timer tm_save;
+	if (!save_ply(output_filename, verts, norms, uvCoords, faces, colors))
+	{
+		std::cout << "Error: Could not save " << output_filename << std::endl;
+		return EXIT_FAILURE;
+	}
+	tm_save.stop();
+
+	std::cout << std::fixed
+		<< "[Times in seconds]  \n"
+		<< "Loading          : " << tm_load.diff_sec() << '\n'
+		<< "Building Kd-Tree : " << tm_kdtree.diff_sec() << '\n'
+		<< "Computing Normals: " << tm_pca.diff_sec() << '\n'
+		<< "Normalizing Vecs : " << tm_nor.diff_sec() << '\n'
+		<< "Saving           : " << tm_save.diff_sec() << '\n'
+		<< std::endl;
+
+	return EXIT_SUCCESS;
 }

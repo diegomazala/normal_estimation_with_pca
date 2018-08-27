@@ -15,14 +15,14 @@ $(LocalDebuggerEnvironment)</LocalDebuggerEnvironment>
 $(LocalDebuggerEnvironment)</LocalDebuggerEnvironment>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
-    <LocalDebuggerCommandArguments>../../data/sphere.obj ply 16 4 128</LocalDebuggerCommandArguments>
+    <LocalDebuggerCommandArguments>../../data/cow.ply ../../data/cow_nor.ply 16 4 128</LocalDebuggerCommandArguments>
     <DebuggerFlavor>WindowsLocalDebugger</DebuggerFlavor>
     <LocalDebuggerWorkingDirectory>$(OutDir)</LocalDebuggerWorkingDirectory>
     <LocalDebuggerEnvironment>PATH=../../3rdparty/assimp/bin
 $(LocalDebuggerEnvironment)</LocalDebuggerEnvironment>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
-    <LocalDebuggerCommandArguments>../../data/sphere.obj ply 16 4 128</LocalDebuggerCommandArguments>
+    <LocalDebuggerCommandArguments>../../data/cow.ply ../../data/cow_nor.ply 16 4 128</LocalDebuggerCommandArguments>
     <DebuggerFlavor>WindowsLocalDebugger</DebuggerFlavor>
     <LocalDebuggerWorkingDirectory>$(OutDir)</LocalDebuggerWorkingDirectory>
     <LocalDebuggerEnvironment>PATH=../../3rdparty/assimp/bin

@@ -24,7 +24,7 @@ void run_pca(
 
 	//std::cout << "Centered Data Matrix:\n" << centenered_data_matrix << std::endl << std::endl;
 
-	Eigen::Matrix<Type, Eigen::Dynamic, Eigen::Dynamic> covariance_matrix = (centenered_data_matrix.adjoint() * centenered_data_matrix) / (Type)(data_matrix.rows());
+	Eigen::Matrix<Type, Eigen::Dynamic, Eigen::Dynamic> covariance_matrix = (centenered_data_matrix.adjoint() * centenered_data_matrix) / (Type)(data_matrix.rows() - 1);
 
 	//std::cout << "Covariance Matrix:\n" << covariance_matrix << std::endl << std::endl;
 
